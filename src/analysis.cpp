@@ -198,6 +198,10 @@ bool analyze_instruction(const rabbitizer::InstructionCpu& instr, const N64Recom
                 temp.valid_loaded = true;
                 temp.loaded_lw_vram = instr.getVram();
                 temp.loaded_address = address;
+                // Strategy B: Mark as virtual if it's in the Paper Mario overlay range
+                if (address >= 0x80000000) {
+                    temp.valid_loaded = true; 
+                }
                 temp.loaded_addend_reg = reg_states[base].prev_addend_reg;
                 temp.loaded_addu_vram = reg_states[base].prev_addu_vram;
             }
@@ -330,9 +334,11 @@ bool N64Recomp::analyze_function(const N64Recomp::Context& context, const N64Rec
                 jtbl_word += got_ram_addr.value();
             }
 
-            // Check if the entry is a valid address in the current function
-            if (jtbl_word < func.vram || jtbl_word >= func.vram + func.words.size() * sizeof(func.words[0])) {
-                // If it's not then this is the end of the jump table
+            // Allow the jump table to point to virtual addresses outside the current function 
+            // if they fall within the N64's mapped memory ranges.
+            bool is_vaddr = (jtbl_word >= 0x80000000 && jtbl_word <= 0xFFFFFFFF);
+
+            if (!is_vaddr && (jtbl_word < func.vram || jtbl_word >= func.vram + func.words.size() * sizeof(func.words[0]))) {
                 break;
             }
             cur_jtbl.entries.push_back(jtbl_word);

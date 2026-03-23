@@ -305,8 +305,14 @@ bool process_instruction(GeneratorType& generator, const N64Recomp::Context& con
 
                 switch (jal_result) {
                     case JalResolutionResult::NoMatch:
-                        fmt::print(stderr, "No function found for jal target: 0x{:08X}\n", target_func_vram);
-                        return false;
+                        if (target_func_vram >= 0x80000000) {
+                            fmt::print(stderr, "Virtual JAL detected: 0x{:08X}. Deferring to Runtime TLB.\n", target_func_vram);
+                            call_by_lookup = true; 
+                        } else {
+                            fmt::print(stderr, "No function found for jal target: 0x{:08X}\n", target_func_vram);
+                            return false;
+                        }
+                        break;
                     case JalResolutionResult::Match:
                         jal_target_name = context.functions[matched_func_index].name;
                         break;

@@ -407,11 +407,15 @@ void N64Recomp::CGenerator::emit_function_end() const {
 }
 
 void N64Recomp::CGenerator::emit_function_call_lookup(uint32_t addr) const {
-    fmt::print(output_file, "LOOKUP_FUNC(0x{:08X})(rdram, ctx);\n", addr);
+    if (addr < 0x80000000 || addr > 0xBFFFFFFF) {
+        fmt::print(output_file, "LOOKUP_FUNC(ultramodern::mem::translate_vaddr(0x{:08X}))(rdram, ctx);\n", addr);
+    } else {
+        fmt::print(output_file, "LOOKUP_FUNC(0x{:08X})(rdram, ctx);\n", addr);
+    }
 }
 
 void N64Recomp::CGenerator::emit_function_call_by_register(int reg) const {
-    fmt::print(output_file, "LOOKUP_FUNC({})(rdram, ctx);\n", gpr_to_string(reg));
+    fmt::print(output_file, "LOOKUP_FUNC(ultramodern::mem::translate_vaddr({}))(rdram, ctx);\n", gpr_to_string(reg));
 }
 
 void N64Recomp::CGenerator::emit_function_call_reference_symbol(const Context& context, uint16_t section_index, size_t symbol_index, uint32_t target_section_offset) const {
