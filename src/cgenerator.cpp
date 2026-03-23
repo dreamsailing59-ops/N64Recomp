@@ -90,12 +90,12 @@ static std::string fpr_to_string(int fpr_index) {
 }
 
 static std::string fpr_double_to_string(int fpr_index) {
-    return fmt::format("ctx->f{}.d", fpr_index);
+    return fmt::format("ctx->f{}.f64", fpr_index);
 }
 
 static std::string fpr_u32l_to_string(int fpr_index) {
     if (fpr_index & 1) {
-        return fmt::format("ctx->f_odd[({} - 1) * 2]", fpr_index);
+        return fmt::format("ctx->f_odd[{}]", fpr_index);
     }
     else {
         return fmt::format("ctx->f{}.u32l", fpr_index);
@@ -658,7 +658,7 @@ void N64Recomp::CGenerator::process_store_op(const StoreOp& op, const Instructio
             fmt::print(output_file, "{}(rdram, {}, {}, {});\n", func_text, imm_str, base_str, value_input);
             break;
         case StoreSyntax::Assignment:
-            fmt::print(output_file, "{}({}, {}) = {};\n", func_text, imm_str, base_str, value_input);
+            fmt::print(output_file, "*({}({}, {})) = {};\n", func_text, imm_str, base_str, value_input);
             break;
     }
 }
