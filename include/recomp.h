@@ -399,33 +399,34 @@ static inline int64_t do_cvt_l_d(double val) {
 //#define NAN_CHECK(val)
 
 typedef union {
-    double d;
-    struct {
-        float fl;
-        float fh;
-    };
-    struct {
-        uint32_t u32l;
-        uint32_t u32h;
-    };
+    double f64;      // Used for double-precision ops
+    double d;        // Alternative name used by some generators
+    float f32;
+    float fl;        // Used for single-precision ops
     uint64_t u64;
+    uint32_t u32l;
+    struct {
+        uint32_t lo;
+        uint32_t hi;
+    } u32;
 } fpr;
 
 typedef struct recomp_context {
-    uint32_t r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10;
-    uint32_t r11, r12, r13, r14, r15, r16, r17, r18, r19, r20;
-    uint32_t r21, r22, r23, r24, r25, r26, r27, r28, r29, r30, r31;
-    union {
-        double f64;
-        float fl;
-        uint64_t u64;
-        uint32_t u32l;
-        double d; // FIX: Adds the missing .d member
-    } f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, 
-      f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27, f28, f29, f30, f31;
-    uint32_t f_odd[64]; // FIX: Adds the missing f_odd array
-    uint32_t hi, lo;
+    // 64-bit General Purpose Registers
+    uint64_t r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10;
+    uint64_t r11, r12, r13, r14, r15, r16, r17, r18, r19, r20;
+    uint64_t r21, r22, r23, r24, r25, r26, r27, r28, r29, r30, r31;
+
+    // Floating Point Registers - NOW USING THE fpr TYPE
+    fpr f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, 
+        f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27, f28, f29, f30, f31;
+
+    uint32_t f_odd[64]; 
+    uint64_t hi, lo;
 } recomp_context;
+
+// Prototype for the missing function error
+void osPfsNumFiles_recomp(uint8_t* rdram, recomp_context* ctx);
 
 // Checks if the target is an even float register or that mips3 float mode is enabled
 #define CHECK_FR(ctx, idx) \
@@ -474,3 +475,10 @@ void pause_self(uint8_t *rdram);
 #endif
 
 #endif
+
+uint32_t translate_vaddr(uint32_t vaddr);
+void __osSiRawReadIo_recomp(uint8_t* rdram, recomp_context* ctx);
+void __osSpDeviceBusy_recomp(uint8_t* rdram, recomp_context* ctx);
+void osEPiWriteIo_recomp(uint8_t* rdram, recomp_context* ctx);
+void osPfsRepairId_recomp(uint8_t* rdram, recomp_context* ctx);
+void osPfsNumFiles_recomp(uint8_t* rdram, recomp_context* ctx);

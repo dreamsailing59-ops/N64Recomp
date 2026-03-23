@@ -6,6 +6,10 @@
 
 #include "recompiler/generator.h"
 
+#include <set>
+static std::set<std::string> emitted_labels;
+static std::set<std::string> referenced_labels;
+
 struct BinaryOpFields { std::string func_string; std::string infix_string; };
 
 static std::vector<BinaryOpFields> c_op_fields = []() {
@@ -90,7 +94,7 @@ static std::string fpr_to_string(int fpr_index) {
 }
 
 static std::string fpr_double_to_string(int fpr_index) {
-    return fmt::format("ctx->f{}.f64", fpr_index);
+    return fmt::format("ctx->f{}.u64", fpr_index);
 }
 
 static std::string fpr_u32l_to_string(int fpr_index) {
@@ -394,16 +398,26 @@ void N64Recomp::CGenerator::get_binary_expr_string(BinaryOpType type, const Bina
 
 void N64Recomp::CGenerator::emit_function_start(const std::string& function_name, size_t func_index) const {
     (void)func_index;
+    emitted_labels.clear();    // NEW: Clear tracker
+    referenced_labels.clear(); // NEW: Clear tracker
+    
     fmt::print(output_file,
         "RECOMP_FUNC void {}(uint8_t* rdram, recomp_context* ctx) {{\n"
-        // these variables shouldn't need to be preserved across function boundaries, so make them local for more efficient output
         "    uint64_t hi = 0, lo = 0, result = 0;\n"
-        "    int c1cs = 0;\n", // cop1 conditional signal
+        "    int c1cs = 0;\n",
         function_name);
 }
 
 void N64Recomp::CGenerator::emit_function_end() const {
-    fmt::print(output_file, ";}}\n");
+    // NEW: Catch-all for missing labels
+    fmt::print(output_file, "\n    /* Missing Label Fallbacks */\n");
+    for (const auto& label : referenced_labels) {
+        if (emitted_labels.find(label) == emitted_labels.end()) {
+            fmt::print(output_file, "    {}: ;\n", label); // Emit a dummy label with a null statement
+        }
+    }
+    
+    fmt::print(output_file, "}}\n");
 }
 
 void N64Recomp::CGenerator::emit_function_call_lookup(uint32_t addr) const {
@@ -433,13 +447,13 @@ void N64Recomp::CGenerator::emit_named_function_call(const std::string& function
 }
 
 void N64Recomp::CGenerator::emit_goto(const std::string& target) const {
-    fmt::print(output_file,
-        "    goto {};\n", target);
+    referenced_labels.insert(target); // NEW: Track target
+    fmt::print(output_file, "    goto {};\n", target);
 }
 
 void N64Recomp::CGenerator::emit_label(const std::string& label_name) const {
-    fmt::print(output_file,
-        "{}:\n", label_name);
+    emitted_labels.insert(label_name); // NEW: Track that this label actually exists
+    fmt::print(output_file, "{}:\n", label_name);
 }
 
 void N64Recomp::CGenerator::emit_jtbl_addend_declaration(const JumpTable& jtbl, int reg) const {
@@ -474,6 +488,7 @@ void N64Recomp::CGenerator::emit_switch(const Context& recompiler_context, const
 }
 
 void N64Recomp::CGenerator::emit_case(int case_index, const std::string& target_label) const {
+    referenced_labels.insert(target_label); // NEW: Track target
     fmt::print(output_file, "case {}: goto {}; break;\n", case_index, target_label);
 }
 
@@ -658,7 +673,7 @@ void N64Recomp::CGenerator::process_store_op(const StoreOp& op, const Instructio
             fmt::print(output_file, "{}(rdram, {}, {}, {});\n", func_text, imm_str, base_str, value_input);
             break;
         case StoreSyntax::Assignment:
-            fmt::print(output_file, "*({}({}, {})) = {};\n", func_text, imm_str, base_str, value_input);
+            fmt::print(output_file, "{}({}, {}) = {};\n", func_text, imm_str, base_str, value_input);
             break;
     }
 }

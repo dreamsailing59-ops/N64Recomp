@@ -132,16 +132,11 @@ bool recompile_single_function(const N64Recomp::Context& context, size_t func_in
     }
     
     output_file.close();
-
-    // If a file of the target name exists and it's identical to the output file, delete the output file.
-    // This prevents updating the existing file so that it doesn't need to be rebuilt.
-    if (std::filesystem::exists(output_path) && compare_files(output_path, temp_path)) {
-        std::filesystem::remove(temp_path);
+    
+    if (std::filesystem::exists(output_path)) {
+        std::filesystem::remove(output_path);
     }
-    // Otherwise, rename the new file to the target path.
-    else {
-        std::filesystem::rename(temp_path, output_path);
-    }
+    std::filesystem::rename(temp_path, output_path);
 
     return true;
 }
@@ -471,7 +466,8 @@ int main(int argc, char** argv) {
     std::ofstream func_header_file{ config.output_func_path / "funcs.h" };
 
     fmt::print(func_header_file,
-        "{}\n"
+        "#include \"recomp.h\"\n"
+        "#include <string.h>\n"
         "\n"
         "// Macro Definitions\n"
         "#ifndef RECOMP_FUNC\n"
@@ -487,29 +483,79 @@ int main(int argc, char** argv) {
         "#undef printf\n"
         "#define printf n64_printf\n"
         "\n"
-        "#define MEM_B(offset, vaddr) ((uint8_t* )(rdram + (translate_vaddr((vaddr) + (offset)))))\n"
-        "#define MEM_H(offset, vaddr) ((uint16_t*)(rdram + (translate_vaddr((vaddr) + (offset)))))\n"
-        "#define MEM_W(offset, vaddr) ((uint32_t*)(rdram + (translate_vaddr((vaddr) + (offset)))))\n"
-        "#define MEM_BU(offset, vaddr) (*MEM_B(offset, vaddr))\n"
-        "#define MEM_HU(offset, vaddr) (*MEM_H(offset, vaddr))\n"
+        "// Override Memory access macros to ensure they use translate_vaddr properly\n"
+        "#undef MEM_B\n"
+        "#define MEM_B(offset, vaddr) (*((uint8_t* )(rdram + (translate_vaddr((vaddr) + (offset))))))\n"
+        "#undef MEM_H\n"
+        "#define MEM_H(offset, vaddr) (*((uint16_t*)(rdram + (translate_vaddr((vaddr) + (offset))))))\n"
+        "#undef MEM_W\n"
+        "#define MEM_W(offset, vaddr) (*((uint32_t*)(rdram + (translate_vaddr((vaddr) + (offset))))))\n"
         "\n"
+        "#undef MEM_BU\n"
+        "#define MEM_BU(offset, vaddr) MEM_B(offset, vaddr)\n"
+        "#undef MEM_HU\n"
+        "#define MEM_HU(offset, vaddr) MEM_H(offset, vaddr)\n"
+        "\n"
+        "#undef LD\n"
         "#define LD(vaddr, offset) (*(uint64_t*)(rdram + (translate_vaddr((vaddr) + (offset)))))\n"
+        "#undef SD\n"
         "#define SD(value, offset, vaddr) (*(uint64_t*)(rdram + (translate_vaddr((vaddr) + (offset)))) = (value))\n"
         "\n"
+        "// Integer helper macros - Undefining to prevent redefinition warnings\n"
+        "#undef S32\n"
         "#define S32(x) ((int32_t)(x))\n"
+        "#undef U32\n"
         "#define U32(x) ((uint32_t)(x))\n"
+        "#undef S64\n"
         "#define S64(x) ((int64_t)(x))\n"
+        "#undef U64\n"
         "#define U64(x) ((uint64_t)(x))\n"
+        "#undef SIGNED\n"
         "#define SIGNED(x) ((int32_t)(x))\n"
+        "#undef ADD32\n"
         "#define ADD32(a, b) (S32((U32(a) + U32(b))))\n"
+        "#undef SUB32\n"
         "#define SUB32(a, b) (S32((U32(a) - U32(b))))\n"
         "\n"
+        "// --- Double Precision Math via u64 Aliasing ---\n"
+        "static inline uint64_t bitcast_double_to_u64(double d) {{ uint64_t u; memcpy(&u, &d, 8); return u; }}\n"
+        "static inline double   bitcast_u64_to_double(uint64_t u) {{ double d; memcpy(&d, &u, 8); return d; }}\n"
+        "\n"
+        "#undef MUL_D\n"
+        "#define MUL_D(a, b) bitcast_double_to_u64(bitcast_u64_to_double(a) * bitcast_u64_to_double(b))\n"
+        "#undef DIV_D\n"
+        "#define DIV_D(a, b) bitcast_double_to_u64(bitcast_u64_to_double(a) / bitcast_u64_to_double(b))\n"
+        "#undef ADD_D\n"
+        "#define ADD_D(a, b) bitcast_double_to_u64(bitcast_u64_to_double(a) + bitcast_u64_to_double(b))\n"
+        "#undef SUB_D\n"
+        "#define SUB_D(a, b) bitcast_double_to_u64(bitcast_u64_to_double(a) - bitcast_u64_to_double(b))\n"
+        "\n"
+        "// Conversion macros\n"
+        "#undef CVT_D_S\n"
+        "#define CVT_D_S(f)  bitcast_double_to_u64((double)(f))\n"
+        "#undef CVT_S_D\n"
+        "#define CVT_S_D(u)  ((float)bitcast_u64_to_double(u))\n"
+        "#undef TRUNC_W_D\n"
+        "#define TRUNC_W_D(u) ((int32_t)bitcast_u64_to_double(u))\n"
+        "#undef CVT_D_W\n"
+        "#define CVT_D_W(i)  bitcast_double_to_u64((double)(int32_t)(i))\n"
+        "\n"
+        "#undef NAN_CHECK\n"
         "#define NAN_CHECK(x)\n"
+        "#undef CHECK_FR\n"
         "#define CHECK_FR(ctx, reg)\n"
         "#define do_break(v)\n"
         "#define pause_self(r)\n"
         "#define switch_error(f, a, b)\n"
         "#define osViRepeatLine_recomp(r, c)\n"
+        "\n"
+        "// Function Prototypes for Runtime Symbols\n"
+        "uint32_t translate_vaddr(uint32_t vaddr);\n"
+        "void __osSiRawReadIo_recomp(uint8_t* rdram, recomp_context* ctx);\n"
+        "void __osSpDeviceBusy_recomp(uint8_t* rdram, recomp_context* ctx);\n"
+        "void osEPiWriteIo_recomp(uint8_t* rdram, recomp_context* ctx);\n"
+        "void osPfsRepairId_recomp(uint8_t* rdram, recomp_context* ctx);\n"
+        "void osPfsNumFiles_recomp(uint8_t* rdram, recomp_context* ctx);\n"
         "\n"
         "#ifdef __cplusplus\n"
         "extern \"C\" {{\n"
@@ -517,7 +563,7 @@ int main(int argc, char** argv) {
         "\n",
         config.recomp_include
     );
-
+    
     std::vector<std::vector<uint32_t>> static_funcs_by_section{ context.sections.size() };
 
     fmt::print("Working dir: {}\n", std::filesystem::current_path().string());
