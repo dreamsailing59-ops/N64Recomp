@@ -122,43 +122,49 @@ std::string_view ctx_gpr_prefix(int reg) {
 }
 
 uint32_t expected_c0_reg_value(int cop0_reg) {
-    switch (static_cast<Cop0Reg>(cop0_reg)) {
-    case Cop0Reg::RSP_COP0_SP_STATUS:
-        return 0; // None of the flags in RSP status are set
-    case Cop0Reg::RSP_COP0_SP_DMA_FULL:
-        return 0; // Pretend DMAs complete instantly
-    case Cop0Reg::RSP_COP0_SP_DMA_BUSY:
-        return 0; // Pretend DMAs complete instantly
-    case Cop0Reg::RSP_COP0_SP_SEMAPHORE:
-        return 0; // Always acquire the semaphore
-    case Cop0Reg::RSP_COP0_DPC_STATUS:
-        return 0; // Good enough for the microcodes that would be recompiled (i.e. non-graphics ones)
+    switch (cop0_reg) {
+    case 0: case 1: case 2: case 3: // DMA Regs
+    case 4:  // SP_STATUS
+    case 5:  // SP_DMA_FULL
+    case 6:  // SP_DMA_BUSY
+    case 7:  // DPC_CLOCK
+    case 11: // SP_SEMAPHORE
+    case 13: // DPC_STATUS
+    case 28: case 29: case 30: case 31: // DPC High
+        return 0; 
     default:
         fmt::print(stderr, "Unhandled mfc0: {}\n", cop0_reg);
         throw std::runtime_error("Unhandled mfc0");
-        return 0;
     }
 }
 
 std::string_view c0_reg_write_action(int cop0_reg) {
-    switch (static_cast<Cop0Reg>(cop0_reg)) {
-    case Cop0Reg::RSP_COP0_SP_SEMAPHORE:
-        return ""; // Ignore semaphore functionality
-    case Cop0Reg::RSP_COP0_SP_STATUS:
-        return ""; // Ignore writes to the status flags since yielding is ignored
-    case Cop0Reg::RSP_COP0_SP_DRAM_ADDR:
-        return "SET_DMA_DRAM";
-    case Cop0Reg::RSP_COP0_SP_MEM_ADDR:
-        return "SET_DMA_MEM";
-    case Cop0Reg::RSP_COP0_SP_RD_LEN:
-        return "DO_DMA_READ";
-    case Cop0Reg::RSP_COP0_SP_WR_LEN:
-        return "DO_DMA_WRITE";
+    switch (cop0_reg) {
+    // --- RDP / Status Stubs (Return empty string) ---
+    case 4:  // RSP_COP0_SP_STATUS
+    case 7:  // DPC_CLOCK
+    case 8:  // DPC_BUFBUSY
+    case 9:  // DPC_START
+    case 10: // DPC_END
+    case 11: // RSP_COP0_SP_SEMAPHORE
+    case 12: // DPC_STATUS_ALT
+    case 13: // DPC_STATUS
+    case 28: // DPC_TMEM
+    case 29: // DPC_PIPEBUSY
+    case 30: // DPC_TMEMBUSY
+    case 31: // DPC_CMD_BUSY
+        return ""; 
+
+    // --- DMA Engine Commands (Return function names) ---
+    case 0: return "SET_DMA_MEM";  // RSP_COP0_SP_MEM_ADDR
+    case 1: return "SET_DMA_DRAM"; // RSP_COP0_SP_DRAM_ADDR
+    case 2: return "DO_DMA_READ";  // RSP_COP0_SP_RD_LEN
+    case 3: return "DO_DMA_WRITE"; // RSP_COP0_SP_WR_LEN
+
     default:
         fmt::print(stderr, "Unhandled mtc0: {}\n", cop0_reg);
         throw std::runtime_error("Unhandled mtc0");
     }
-
 }
 
 bool is_c0_reg_write_dma_read(int cop0_reg) {
@@ -228,18 +234,31 @@ bool process_instruction(size_t instr_index, const std::vector<rabbitizer::Instr
     uint32_t instr_vram = instr.getVram();
     InstrId instr_id = instr.getUniqueId();
 
-    // Skip labels if we're duplicating an instruction into a delay slot
+    int rd = (int)instr.GetO32_rd();
+    int rs = (int)instr.GetO32_rs();
+    int base = rs; 
+    int rt = (int)instr.GetO32_rt();
+    int sa = (int)instr.Get_sa();
+
+    int fd = (int)instr.GetO32_fd();
+    int fs = (int)instr.GetO32_fs();
+    int ft = (int)instr.GetO32_ft();
+
+    uint16_t imm = instr.Get_immediate();
+    uint16_t branch_target = instr.getBranchVramGeneric() & rsp_mem_mask;
+
+    bool is_risky_cop0 = (instr_id == InstrId::rsp_mtc0 || instr_id == InstrId::rsp_mfc0) && (rd > 7);
+
     if (!in_delay_slot) {
-        // Print a label if one exists here
         if (branch_targets.direct_targets.contains(instr_vram) || branch_targets.indirect_targets.contains(instr_vram)) {
             fmt::print(output_file, "L_{:04X}:\n", instr_vram);
         }
     }
 
-    uint16_t branch_target = instr.getBranchVramGeneric() & rsp_mem_mask;
-
-    // Output a comment with the original instruction
-    if (instr.isBranch() || instr_id == InstrId::rsp_j) {
+    // Comment printing block using the safety check
+    if (is_risky_cop0) {
+        fmt::print(output_file, "    // [RSPRecomp] Manual Stub for COP0 Reg {}\n", rd);
+    } else if (instr.isBranch() || instr_id == InstrId::rsp_j) {
         fmt::print(output_file, "    // {}\n", instr.disassemble(0, fmt::format("L_{:04X}", branch_target)));
     } else if (instr_id == InstrId::rsp_jal) {
         fmt::print(output_file, "    // {}\n", instr.disassemble(0, fmt::format("0x{:04X}", branch_target)));
@@ -294,18 +313,6 @@ bool process_instruction(size_t instr_index, const std::vector<rabbitizer::Instr
             print_indent();
         }
     }
-
-    int rd = (int)instr.GetO32_rd();
-    int rs = (int)instr.GetO32_rs();
-    int base = rs;
-    int rt = (int)instr.GetO32_rt();
-    int sa = (int)instr.Get_sa();
-
-    int fd = (int)instr.GetO32_fd();
-    int fs = (int)instr.GetO32_fs();
-    int ft = (int)instr.GetO32_ft();
-
-    uint16_t imm = instr.Get_immediate();
 
     std::string unsigned_imm_string = fmt::format("{:#X}", imm);
     std::string signed_imm_string = fmt::format("{:#X}", (int16_t)imm);
@@ -553,9 +560,9 @@ bool process_instruction(size_t instr_index, const std::vector<rabbitizer::Instr
                 break;
             }
         default:
-            fmt::print(stderr, "Unhandled instruction: {}\n", instr.getOpcodeName());
-            assert(false);
-            return false;
+            fmt::print(stderr, "Skipping invalid instruction at 0x{:04X}\n", instr_vram);
+            fmt::print(output_file, "    // INVALID INSTRUCTION\n");
+            return true; // Keep going!
         }
     }
 
@@ -1108,6 +1115,15 @@ int main(int argc, const char** argv) {
         }
 
         rom_file.seekg(config.text_offset);
+        uint16_t magic = 0;
+        rom_file.read(reinterpret_cast<char*>(&magic), 2);
+
+        if (byteswap(magic) >> 16 == 0x4A00 || magic == 0x4A00) {
+            fmt::print("Yay0 Header detected! Skipping 16 bytes...\n");
+            rom_file.seekg(config.text_offset + 16);
+        } else {
+            rom_file.seekg(config.text_offset);
+        }
         rom_file.read(reinterpret_cast<char*>(instr_words.data()), config.text_size);
 
         for (const RSPRecompilerOverlaySlotConfig &slot_config : config.overlay_slots) {
