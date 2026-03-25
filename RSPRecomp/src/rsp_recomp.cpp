@@ -115,10 +115,8 @@ std::unordered_map<InstrId, std::array<RspOperand, 3>> vector_operands{
 };
 
 std::string_view ctx_gpr_prefix(int reg) {
-    if (reg != 0) {
-        return "r";
-    }
-    return "";
+    // Every register, including 0, should be prefixed with 'r'
+    return "r";
 }
 
 uint32_t expected_c0_reg_value(int cop0_reg) {
